@@ -1,11 +1,11 @@
 <?php
-// Разрешаем запросы с других доменов (чтобы не было ошибки CORS при тестах)
+// Разрешаем запросы (чтобы не было ошибки CORS при локальном тестировании)
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 
 // ВСТАВЬТЕ ВАШИ ДАННЫЕ СЮДА
-$botToken = '9005989171:AAF7iOziW3xpFgb0pangWl6OmlqkDFsXhKM'; 
-$chatId = '5450527103';
+$botToken = 'ВАШ_НОВЫЙ_ТОКЕН'; 
+$chatId = 'ВАШ_CHAT_ID';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $message = $_POST['message'] ?? 'Обнаружено нарушение';
@@ -41,3 +41,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 } else {
     echo json_encode(['status' => 'error', 'message' => 'Метод не поддерживается']);
 }
+?>
