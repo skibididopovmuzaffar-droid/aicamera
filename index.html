@@ -2,198 +2,598 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>AI Камера в Telegram (Телефон + Сон)</title>
-    <!-- Подключаем TensorFlow и модель COCO-SSD -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📱 Детектор телефонов v3.0 (Максимум)</title>
     <style>
-        body { background: #1a1a1a; color: white; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
-        .container { position: relative; display: inline-block; margin-top: 20px; }
-        video, canvas.overlay { width: 640px; height: 480px; transform: scaleX(-1); /* Зеркальное отображение */ }
-        canvas.overlay { position: absolute; top: 0; left: 0; }
-        #status { margin-top: 15px; font-weight: bold; color: #00ff00; font-size: 18px;}
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; padding: 20px; color: #333;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header, .settings-panel, .status-panel, .preview-container, .detections-panel {
+            background: white; border-radius: 15px; padding: 20px;
+            margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header { text-align: center; padding: 25px; }
+        .header h1 { color: #764ba2; margin-bottom: 10px; font-size: 2.2em; }
+        .settings-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px; margin-top: 15px;
+        }
+        .setting-item { display: flex; flex-direction: column; gap: 6px; }
+        .setting-item label { font-weight: 600; color: #555; font-size: 0.85em; }
+        .setting-item input, .setting-item select {
+            padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px;
+            font-size: 1em; transition: border-color 0.3s;
+        }
+        .setting-item input:focus, .setting-item select:focus { outline: none; border-color: #764ba2; }
+        .toggle-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px; background: #f7f7f7; border-radius: 8px;
+        }
+        .toggle-row input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; }
+        .toggle-row label { cursor: pointer; font-size: 0.9em; font-weight: 500; }
+        .status-panel { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; }
+        .status-info { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+        .status-badge { padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9em; }
+        .status-active { background: #4caf50; color: white; }
+        .status-inactive { background: #f44336; color: white; }
+        .status-warning { background: #ff9800; color: white; }
+        .stats { display: flex; gap: 20px; }
+        .stat-item { text-align: center; }
+        .stat-value { font-size: 1.5em; font-weight: 700; color: #764ba2; }
+        .stat-label { font-size: 0.75em; color: #666; }
+        .button {
+            padding: 12px 24px; border: none; border-radius: 8px;
+            font-size: 1em; font-weight: 600; cursor: pointer;
+            transition: all 0.3s; background: #764ba2; color: white; margin: 2px;
+        }
+        .button:hover { background: #5a3d7a; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+        .button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+        .button-danger { background: #f44336; }
+        .button-danger:hover { background: #d32f2f; }
+        .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .preview-item { text-align: center; }
+        .preview-item h3 { margin-bottom: 8px; color: #555; font-size: 1em; }
+        .preview-canvas { width: 100%; border: 2px solid #e0e0e0; border-radius: 8px; background: #f5f5f5; display: block; }
+        .detections-list { max-height: 300px; overflow-y: auto; margin-top: 10px; }
+        .detection-item {
+            padding: 10px; border-bottom: 1px solid #e0e0e0;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 0.9em;
+        }
+        .detection-item:last-child { border-bottom: none; }
+        .detection-phone { background: #ffebee; border-left: 4px solid #ff0000; }
+        .detection-posture { background: #fff8e1; border-left: 4px solid #ff9800; }
+        .telegram-log {
+            background: #f5f5f5; border-radius: 8px; padding: 15px; margin-top: 15px;
+            max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.85em;
+        }
+        .log-entry { padding: 5px; border-bottom: 1px solid #ddd; }
+        .log-entry:last-child { border-bottom: none; }
+        .footer { text-align: center; margin-top: 20px; color: white; }
+        .hint { font-size: 0.8em; color: #999; margin-top: 4px; }
+        @media (max-width: 768px) { .preview-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
-
-    <h2>ИИ-Мониторинг (Телефон + Контроль сна)</h2>
     <div class="container">
-        <video id="webcam" autoplay playsinline muted></video>
-        <canvas id="overlay" class="overlay"></canvas>
-    </div>
-    <div id="status">Загрузка ИИ...</div>
+        <div class="header">
+            <h1>📱 Детектор телефонов v3.0</h1>
+            <p>Нейросеть + поиск скрытых объектов (между ног, на коленях, под партой)</p>
+        </div>
 
-    <!-- Скрытый холст для создания скриншота -->
-    <canvas id="snapshot" style="display:none;"></canvas>
+        <div class="settings-panel">
+            <h2>⚙️ Настройки</h2>
+            <div class="settings-grid">
+                <div class="setting-item">
+                    <label>Telegram Bot Token</label>
+                    <input type="text" id="botToken" placeholder="1234567890:ABC...">
+                </div>
+                <div class="setting-item">
+                    <label>Telegram Chat ID</label>
+                    <input type="text" id="chatId" placeholder="123456789">
+                </div>
+                <div class="setting-item">
+                    <label>Интервал (сек)</label>
+                    <input type="number" id="interval" min="1" max="10" value="2">
+                </div>
+                <div class="setting-item">
+                    <label>Cooldown уведомлений (сек)</label>
+                    <input type="number" id="cooldown" min="5" max="120" value="15">
+                </div>
+                <div class="setting-item">
+                    <label>Порог уверенности (%)</label>
+                    <input type="number" id="confidence" min="10" max="95" value="35">
+                </div>
+            </div>
+
+            <h3 style="margin-top: 20px; color: #555;">🔬 Детекторы</h3>
+            <div class="settings-grid" style="margin-top: 10px;">
+                <div class="toggle-row">
+                    <input type="checkbox" id="tiledDetection" checked>
+                    <label for="tiledDetection">Tiled детекция (ловит мелкие объекты)</label>
+                </div>
+                <div class="toggle-row">
+                    <input type="checkbox" id="glowDetection" checked>
+                    <label for="glowDetection">Детектор свечения экрана</label>
+                </div>
+                <div class="toggle-row">
+                    <input type="checkbox" id="poseDetection" checked>
+                    <label for="poseDetection">Анализ позы (спит/сгорблен)</label>
+                </div>
+                <div class="toggle-row">
+                    <input type="checkbox" id="shapeDetection" checked>
+                    <label for="shapeDetection">Эвристика форм (скрытые телефоны)</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="status-panel">
+            <div class="status-info">
+                <div class="status-badge status-inactive" id="statusBadge">⏸ Остановлено</div>
+                <div class="stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="phoneCount">0</div>
+                        <div class="stat-label">Телефонов</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="detectionCount">0</div>
+                        <div class="stat-label">Детекций</div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <button class="button" id="startBtn" onclick="startDetection()">▶ Запустить</button>
+                <button class="button button-danger" id="stopBtn" onclick="stopDetection()" disabled>⏹ Остановить</button>
+            </div>
+        </div>
+
+        <div class="preview-container">
+            <h2>📸 Превью</h2>
+            <div class="preview-grid">
+                <div class="preview-item">
+                    <h3>Захват экрана</h3>
+                    <video id="screenVideo" autoplay playsinline muted style="display: none;"></video>
+                    <div id="noVideo" style="padding: 50px; text-align: center; background: #f5f5f5; border-radius: 8px;">
+                        🎥 Запустите детектор
+                    </div>
+                </div>
+                <div class="preview-item">
+                    <h3>Результат (🔴 телефон | 🟡 поза)</h3>
+                    <canvas id="detectionCanvas" class="preview-canvas" width="640" height="480"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="detections-panel">
+            <h2>🔍 Последние обнаружения</h2>
+            <div class="detections-list" id="detectionsList">
+                <div class="detection-item" style="justify-content: center; color: #999;">Нет обнаружений</div>
+            </div>
+
+            <h2 style="margin-top: 20px;">📱 Telegram лог</h2>
+            <div class="telegram-log" id="telegramLog">
+                <div class="log-entry" style="color: #999;">Ожидание...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 
     <script>
-        const video = document.getElementById('webcam');
-        const overlay = document.getElementById('overlay');
-        const ctx = overlay.getContext('2d');
-        const snapshotCanvas = document.getElementById('snapshot');
-        const snapCtx = snapshotCanvas.getContext('2d');
-        const statusDiv = document.getElementById('status');
+        let cocoModel = null;
+        let poseDetector = null;
+        let detectionInterval = null;
+        let isDetecting = false;
+        let isProcessing = false; 
+        let lastNotificationTime = 0;
+        let phoneCount = 0;
+        let totalDetections = 0;
+        let stream = null;
 
-        let model;
-        
-        // Таймеры антиспама
-        let lastPhoneAlertTime = 0; 
-        let lastSleepAlertTime = 0;
+        const $ = id => document.getElementById(id);
+        const startBtn = $('startBtn'), stopBtn = $('stopBtn');
+        const statusBadge = $('statusBadge');
+        const screenVideo = $('screenVideo'), screenCanvas = document.createElement('canvas'); 
+        const detectionCanvas = $('detectionCanvas');
+        const ctx = detectionCanvas.getContext('2d');
+        const noVideoDiv = $('noVideo');
+        const detectionsList = $('detectionsList');
+        const telegramLog = $('telegramLog');
 
-        // Переменные для отслеживания сна
-        let lastPersonBox = null;
-        let stillStartTime = Date.now();
-        
-        // НАСТРОЙКИ (можно менять)
-        const STILL_THRESHOLD = 15;       // Пикселей (насколько должна сдвинуться рамка, чтобы считать это движением)
-        const SLEEP_TIME_MS = 120000;     // 2 минуты (120 000 мс) без движения = тревога
-
-        // 1. Включаем камеру
-        async function setupCamera() {
+        async function loadModels() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-                video.srcObject = stream;
-                return new Promise(resolve => video.onloadedmetadata = () => resolve(video));
-            } catch (e) {
-                statusDiv.innerText = "Ошибка доступа к камере: " + e.message;
-            }
-        }
+                statusBadge.textContent = '🔄 Загрузка COCO-SSD...';
+                statusBadge.className = 'status-badge status-warning';
+                cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
 
-        // 2. Загружаем ИИ
-        async function loadModel() {
-            model = await cocoSsd.load();
-            statusDiv.innerText = "ИИ работает. Следим за телефоном и сном...";
-        }
-
-        // 3. Главный цикл распознавания
-        async function detect() {
-            if (video.readyState === 4) {
-                overlay.width = video.videoWidth;
-                overlay.height = video.videoHeight;
-                snapshotCanvas.width = video.videoWidth;
-                snapshotCanvas.height = video.videoHeight;
-
-                const predictions = await model.detect(video);
-                ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-                let phoneDetected = false;
-                let personDetected = false;
-                let currentPersonBox = null;
-                let personCount = 0;
-
-                predictions.forEach(p => {
-                    const [x, y, w, h] = p.bbox;
-                    
-                    // СНИЖЕННЫЙ ПОРОГ ДЛЯ ЧЕЛОВЕКА (0.35), чтобы ловить лежачих
-                    if (p.class === 'person' && p.score > 0.35) {
-                        personDetected = true;
-                        personCount++;
-                        if (!currentPersonBox || (w * h) > (currentPersonBox.w * currentPersonBox.h)) {
-                            currentPersonBox = { x, y, w, h };
-                        }
-                        drawBox(ctx, x, y, w, h, 'lime', `Сотрудник (${Math.round(p.score*100)}%)`);
-                    } 
-                    // ЗАЩИТА ОТ ПУЛЬТОВ (порог 0.75 + проверка пропорций)
-                    else if (p.class === 'cell phone' && p.score > 0.75) { 
-                        const aspectRatio = h / w; 
-                        if (aspectRatio < 2.2) { // Телефоны не такие вытянутые, как пульты
-                            phoneDetected = true;
-                            drawBox(ctx, x, y, w, h, 'red', `ТЕЛЕФОН! (${Math.round(p.score*100)}%)`);
-                        }
-                    }
-                });
-
-                // --- ЛОГИКА 1: ТЕЛЕФОН ---
-                if (phoneDetected && Date.now() - lastPhoneAlertTime > 15000) {
-                    lastPhoneAlertTime = Date.now();
-                    let alertText = `🚨 <b>Нарушение!</b>\nСотрудник использует телефон.\nЛюдей в кадре: ${personCount}`;
-                    captureAndSend(alertText);
-                }
-
-                // --- ЛОГИКА 2: СОН (Отсутствие движения) ---
-                if (personDetected && currentPersonBox) {
-                    if (lastPersonBox) {
-                        const diffX = Math.abs(currentPersonBox.x - lastPersonBox.x);
-                        const diffY = Math.abs(currentPersonBox.y - lastPersonBox.y);
-
-                        if (diffX < STILL_THRESHOLD && diffY < STILL_THRESHOLD) {
-                            // Если неподвижен долгое время
-                            if (Date.now() - stillStartTime > SLEEP_TIME_MS && Date.now() - lastSleepAlertTime > 60000) {
-                                lastSleepAlertTime = Date.now();
-                                stillStartTime = Date.now(); 
-                                let alertText = `😴 <b>Тревога!</b>\nСотрудник не двигается более 2 минут.\nВозможно, спит или отошел.`;
-                                captureAndSend(alertText);
-                            }
-                        } else {
-                            // Если пошевелился
-                            stillStartTime = Date.now();
-                        }
-                    }
-                    lastPersonBox = currentPersonBox;
-                } else {
-                    // Если ИИ потерял человека из виду (например, вы легли и спрятались),
-                    // мы все равно шлем тревогу, если нет движения в кадре
-                    if (Date.now() - stillStartTime > SLEEP_TIME_MS && Date.now() - lastSleepAlertTime > 60000) {
-                        lastSleepAlertTime = Date.now();
-                        stillStartTime = Date.now(); 
-                        let alertText = `😴 <b>Тревога!</b>\nВ кадре давно нет движения (сотрудник пропал из виду или спит).`;
-                        captureAndSend(alertText);
-                    }
-                }
-            }
-            requestAnimationFrame(detect);
-        }
-
-        // Отрисовка рамок
-        function drawBox(context, x, y, w, h, color, label) {
-            context.strokeStyle = color;
-            context.lineWidth = 3;
-            context.strokeRect(x, y, w, h);
-            context.fillStyle = color;
-            context.font = 'bold 16px Arial';
-            context.fillText(label, x, y - 5);
-        }
-
-        // Скриншот и отправка
-        async function captureAndSend(text) {
-            statusDiv.innerText = "📸 Отправка алерта в Telegram...";
-            
-            // Рисуем видео и рамки на скрытый холст
-            snapCtx.drawImage(video, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
-            snapCtx.drawImage(overlay, 0, 0);
-
-            snapshotCanvas.toBlob(async (blob) => {
-                const formData = new FormData();
-                formData.append('photo', blob, 'alert.jpg');
-                formData.append('message', text);
-
+                statusBadge.textContent = '🔄 Загрузка MoveNet...';
                 try {
-                    // Отправляем на наш PHP-скрипт
-                    const response = await fetch('send_photo.php', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    const result = await response.json();
-                    if (result.status === 'success') {
-                        statusDiv.innerText = "✅ Алерт успешно отправлен в Telegram!";
-                        setTimeout(() => statusDiv.innerText = "ИИ работает. Следим...", 3000);
-                    } else {
-                        statusDiv.innerText = "❌ Ошибка ТГ: " + result.message;
-                    }
+                    poseDetector = await poseDetection.createDetector(
+                        poseDetection.SupportedModels.MoveNet,
+                        { modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING }
+                    );
+                    addLog('✅ MoveNet загружен', 'success');
                 } catch (e) {
-                    console.error(e);
-                    statusDiv.innerText = "❌ Ошибка сети. Проверьте сервер.";
+                    addLog('⚠️ MoveNet недоступен, анализ позы отключён', 'error');
                 }
-            }, 'image/jpeg', 0.8);
+
+                statusBadge.textContent = '✅ Готово';
+                statusBadge.className = 'status-badge status-inactive';
+                return true;
+            } catch (e) {
+                addLog('❌ Ошибка загрузки: ' + e.message, 'error');
+                return false;
+            }
         }
 
-        // Запуск
-        window.onload = async () => {
-            await setupCamera();
-            await loadModel();
-            detect();
-        };
+        function extractRegion(sourceCanvas, region) {
+            const c = document.createElement('canvas');
+            c.width = region.w;
+            c.height = region.h;
+            c.getContext('2d').drawImage(sourceCanvas, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h);
+            return c;
+        }
+
+        function applyNMS(boxes, iouThreshold = 0.45) {
+            if (boxes.length === 0) return [];
+            const sorted = [...boxes].sort((a, b) => b.score - a.score);
+            const result = [];
+            const iou = (a, b) => {
+                const [ax, ay, aw, ah] = a, [bx, by, bw, bh] = b;
+                const x1 = Math.max(ax, bx), y1 = Math.max(ay, by);
+                const x2 = Math.min(ax + aw, bx + bw), y2 = Math.min(ay + ah, by + bh);
+                const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+                const union = aw * ah + bw * bh - inter;
+                return union > 0 ? inter / union : 0;
+            };
+            for (const box of sorted) {
+                let keep = true;
+                for (const kept of result) {
+                    if (iou(box.bbox, kept.bbox) > iouThreshold) { keep = false; break; }
+                }
+                if (keep) result.push(box);
+            }
+            return result;
+        }
+
+        // ЭВРИСТИЧЕСКИЙ ДЕТЕКТОР (Ищет темные/светлые прямоугольники: телефоны между ног, на коленях)
+        function detectHiddenPhonesByShape(sourceCanvas) {
+            const w = sourceCanvas.width;
+            const h = sourceCanvas.height;
+            const sctx = sourceCanvas.getContext('2d');
+            const imageData = sctx.getImageData(0, 0, w, h);
+            const data = imageData.data;
+
+            // Сетка для анализа (чтобы не вешать браузер)
+            const gridSize = 16;
+            const cols = Math.floor(w / gridSize);
+            const rows = Math.floor(h / gridSize);
+            
+            const grid = [];
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    let rSum = 0, gSum = 0, bSum = 0, count = 0;
+                    for (let dy = 0; dy < gridSize; dy++) {
+                        for (let dx = 0; dx < gridSize; dx++) {
+                            const px = x * gridSize + dx;
+                            const py = y * gridSize + dy;
+                            if (px >= w || py >= h) continue;
+                            const idx = (py * w + px) * 4;
+                            rSum += data[idx]; gSum += data[idx+1]; bSum += data[idx+2];
+                            count++;
+                        }
+                    }
+                    const avgR = rSum / count, avgG = gSum / count, avgB = bSum / count;
+                    const brightness = (avgR * 0.299 + avgG * 0.587 + avgB * 0.114) / 255;
+                    grid.push({ x: x * gridSize, y: y * gridSize, w: gridSize, h: gridSize, brightness });
+                }
+            }
+
+            // Поиск прямоугольных групп (контрастные пятна)
+            // Телефон обычно имеет темный корпус или светлый экран, образуя прямоугольник
+            let clusters = [];
+            const threshold = 0.35; // Отклонение от среднего фона
+            let avgBackground = 0;
+            for (const cell of grid) avgBackground += cell.brightness;
+            avgBackground /= grid.length;
+
+            for (const cell of grid) {
+                if (Math.abs(cell.brightness - avgBackground) > threshold) {
+                    clusters.push(cell);
+                }
+            }
+
+            // Группировка близких ячеек в один объект
+            const objects = [];
+            while (clusters.length > 0) {
+                let current = clusters.shift();
+                let minX = current.x, minY = current.y, maxX = current.x + current.w, maxY = current.y + current.h;
+                let joined = true;
+                while (joined) {
+                    joined = false;
+                    for (let i = 0; i < clusters.length; i++) {
+                        const c = clusters[i];
+                        if (Math.abs(c.x - maxX) < 40 || Math.abs(c.x + c.w - minX) < 40) {
+                            if (Math.abs(c.y - maxY) < 40 || Math.abs(c.y + c.h - minY) < 40) {
+                                minX = Math.min(minX, c.x);
+                                minY = Math.min(minY, c.y);
+                                maxX = Math.max(maxX, c.x + c.w);
+                                maxY = Math.max(maxY, c.y + c.h);
+                                clusters.splice(i, 1);
+                                joined = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                const objW = maxX - minX, objH = maxY - minY;
+                const aspect = objW / objH;
+                // Телефон: вертикальный (0.4-0.8) или горизонтальный (1.2-2.5)
+                if ((aspect > 0.4 && aspect < 0.8) || (aspect > 1.2 && aspect < 2.5)) {
+                    if (objW > 30 && objH > 30 && objW < w*0.5 && objH < h*0.5) {
+                        objects.push({
+                            bbox: [minX, minY, objW, objH],
+                            score: 0.45, // Синтетическая уверенность
+                            class: 'cell phone',
+                            source: 'shape (скрытый)'
+                        });
+                    }
+                }
+            }
+            return objects;
+        }
+
+        function classifyPosture(pose) {
+            const kp = {};
+            for (const p of pose.keypoints) if (p.score > 0.3) kp[p.name] = p;
+            const result = { suspicious: false, reasons: [], bbox: null };
+            const nose = kp.nose, ls = kp.left_shoulder, rs = kp.right_shoulder;
+            let shoulderY = ls && rs ? (ls.y + rs.y) / 2 : (ls ? ls.y : (rs ? rs.y : null));
+
+            if (nose && shoulderY && nose.y >= shoulderY - 10) {
+                result.suspicious = true; result.reasons.push('голова опущена');
+            }
+            if (nose && kp.left_wrist && Math.hypot(kp.left_wrist.x - nose.x, kp.left_wrist.y - nose.y) < 80) {
+                result.suspicious = true; result.reasons.push('руки у лица');
+            }
+            
+            // Проверка на колени/ноги (если запястья находятся низко)
+            if (kp.left_wrist && kp.left_hip && Math.abs(kp.left_wrist.y - kp.left_hip.y) < 60) {
+                result.suspicious = true; result.reasons.push('руки на коленях');
+            }
+
+            const points = pose.keypoints.filter(p => p.score > 0.25);
+            if (points.length > 0) {
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const p of points) {
+                    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+                    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+                }
+                result.bbox = [Math.max(0, minX - 20), Math.max(0, minY - 20), maxX - minX + 40, maxY - minY + 40];
+            }
+            return result;
+        }
+
+        async function detectPhones(sourceCanvas, baseThreshold) {
+            let results = [];
+            // 1. Полный кадр (нейросеть)
+            const fullPreds = await cocoModel.detect(sourceCanvas);
+            for (const p of fullPreds) {
+                if (p.class === 'cell phone' && p.score >= baseThreshold) {
+                    results.push({ ...p, source: 'нейросеть' });
+                }
+            }
+
+            // 2. Тайлы (нейросеть)
+            if ($('tiledDetection').checked) {
+                const grid = 2, overlap = 0.1;
+                const tw = sourceCanvas.width / grid, th = sourceCanvas.height / grid;
+                for (let i = 0; i < grid; i++) {
+                    for (let j = 0; j < grid; j++) {
+                        const region = {
+                            x: Math.max(0, i * tw - tw * overlap),
+                            y: Math.max(0, j * th - th * overlap),
+                            w: tw * (1 + overlap * 2),
+                            h: th * (1 + overlap * 2)
+                        };
+                        region.w = Math.min(region.w, sourceCanvas.width - region.x);
+                        region.h = Math.min(region.h, sourceCanvas.height - region.y);
+
+                        const tileCanvas = extractRegion(sourceCanvas, region);
+                        const preds = await cocoModel.detect(tileCanvas);
+                        for (const p of preds) {
+                            if (p.class === 'cell phone' && p.score >= baseThreshold * 0.8) {
+                                const [bx, by, bw, bh] = p.bbox;
+                                results.push({
+                                    bbox: [bx + region.x, by + region.y, bw, bh],
+                                    score: p.score, class: 'cell phone', source: 'тайл'
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Эвристика по форме (скрытые объекты)
+            if ($('shapeDetection').checked) {
+                const shapeResults = detectHiddenPhonesByShape(sourceCanvas);
+                // Если скрытый объект находится в области нижней трети кадра или у рук — добавляем
+                results.push(...shapeResults);
+            }
+
+            return applyNMS(results, 0.4);
+        }
+
+        async function detectFrame() {
+            if (!isDetecting || !cocoModel || isProcessing) return;
+            isProcessing = true;
+
+            try {
+                const w = screenVideo.videoWidth;
+                const h = screenVideo.videoHeight;
+                if (!w || !h) { isProcessing = false; return; }
+
+                if (screenCanvas.width !== w || screenCanvas.height !== h) {
+                    screenCanvas.width = w; screenCanvas.height = h;
+                    detectionCanvas.width = w; detectionCanvas.height = h;
+                }
+                const sctx = screenCanvas.getContext('2d');
+                sctx.drawImage(screenVideo, 0, 0);
+                
+                ctx.clearRect(0, 0, w, h);
+                ctx.drawImage(screenCanvas, 0, 0); 
+
+                const baseThreshold = parseInt($('confidence').value) / 100;
+
+                let postures = [];
+                if (poseDetector && $('poseDetection').checked) {
+                    try {
+                        const poses = await poseDetector.estimatePoses(screenVideo);
+                        postures = poses.map(p => classifyPosture(p));
+                    } catch (e) { console.warn('Pose error:', e); }
+                }
+
+                let phones = await detectPhones(screenCanvas, baseThreshold);
+
+                // Отрисовка подозрительных поз
+                for (const p of postures) {
+                    if (!p.suspicious || !p.bbox) continue;
+                    const [x, y, bw, bh] = p.bbox;
+                    ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 3; ctx.setLineDash([5, 5]);
+                    ctx.strokeRect(x, y, bw, bh); ctx.setLineDash([]);
+                    ctx.fillStyle = '#ff9800'; ctx.font = 'bold 14px Arial';
+                    ctx.fillText('⚠️ ' + p.reasons[0], x, Math.max(15, y - 5));
+                }
+
+                // Отрисовка телефонов
+                for (const phone of phones) {
+                    const [x, y, bw, bh] = phone.bbox;
+                    // Красный для нейросети, бордовый для скрытых объектов
+                    ctx.strokeStyle = phone.source.includes('скрытый') ? '#8b0000' : '#ff0000'; 
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x, y, bw, bh);
+                    
+                    ctx.fillStyle = phone.source.includes('скрытый') ? 'rgba(139, 0, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
+                    ctx.font = 'bold 16px Arial';
+                    const label = `📱 ${Math.round(phone.score * 100)}% (${phone.source})`;
+                    ctx.fillRect(x, Math.max(0, y - 22), ctx.measureText(label).width + 10, 22);
+                    ctx.fillStyle = '#fff'; ctx.fillText(label, x + 5, Math.max(16, y - 5));
+                }
+
+                if (phones.length > 0) {
+                    totalDetections++;
+                    $('detectionCount').textContent = totalDetections;
+                    for (const phone of phones) addDetectionToList(phone);
+
+                    const now = Date.now();
+                    if (now - lastNotificationTime >= parseInt($('cooldown').value) * 1000) {
+                        sendTelegramPhoto(detectionCanvas, phones, postures.filter(p => p.suspicious));
+                        lastNotificationTime = now;
+                        phoneCount += phones.length;
+                        $('phoneCount').textContent = phoneCount;
+                    }
+                }
+
+            } catch (e) {
+                console.error('Критическая ошибка в detectFrame:', e);
+                ctx.fillStyle = 'red'; ctx.font = '20px Arial';
+                ctx.fillText('Ошибка: ' + e.message, 20, 50);
+            } finally {
+                isProcessing = false;
+            }
+        }
+
+        async function sendTelegramPhoto(canvas, phones, postures) {
+            const botToken = $('botToken').value.trim();
+            const chatId = $('chatId').value.trim();
+            if (!botToken || !chatId) return;
+
+            const snapshot = document.createElement('canvas');
+            snapshot.width = canvas.width; snapshot.height = canvas.height;
+            snapshot.getContext('2d').drawImage(canvas, 0, 0);
+
+            const blob = await new Promise(res => snapshot.toBlob(res, 'image/jpeg', 0.85));
+            
+            let caption = `🚨 <b>ОБНАРУЖЕНИЕ</b>\n\n📱 Телефонов: <b>${phones.length}</b>\n`;
+            for (const p of phones) caption += `  • ${Math.round(p.score * 100)}% (${p.source})\n`;
+            if (postures.length > 0) {
+                caption += `\n⚠️ Позы:\n`;
+                for (const p of postures) caption += `  • ${p.reasons.join(', ')}\n`;
+            }
+
+            const fd = new FormData();
+            fd.append('chat_id', chatId);
+            fd.append('photo', blob, 'detection.jpg');
+            fd.append('caption', caption);
+            fd.append('parse_mode', 'HTML');
+
+            try {
+                const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: fd });
+                const data = await resp.json();
+                addLog(data.ok ? '✅ Фото отправлено' : '❌ ' + data.description, data.ok ? 'success' : 'error');
+            } catch (e) { addLog('❌ Ошибка сети', 'error'); }
+        }
+
+        function addLog(msg, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'} [${new Date().toLocaleTimeString()}] ${msg}`;
+            entry.style.color = type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#666';
+            telegramLog.insertBefore(entry, telegramLog.firstChild);
+            while (telegramLog.children.length > 10) telegramLog.removeChild(telegramLog.lastChild);
+        }
+
+        function addDetectionToList(phone) {
+            const item = document.createElement('div');
+            item.className = 'detection-item detection-phone';
+            item.innerHTML = `<div><strong>📱 Телефон (${phone.source})</strong><br><small>${new Date().toLocaleTimeString()}</small></div>
+                <div style="font-family:monospace;">${Math.round(phone.score * 100)}%</div>`;
+            detectionsList.insertBefore(item, detectionsList.firstChild);
+            while (detectionsList.children.length > 15) detectionsList.removeChild(detectionsList.lastChild);
+        }
+
+        async function startDetection() {
+            if (isDetecting) return;
+            try {
+                stream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1280, height: 720 } });
+                screenVideo.srcObject = stream;
+                noVideoDiv.style.display = 'none';
+                if (!cocoModel) await loadModels();
+
+                isDetecting = true;
+                startBtn.disabled = true; stopBtn.disabled = false;
+                statusBadge.textContent = '▶ Работает'; statusBadge.className = 'status-badge status-active';
+
+                detectionInterval = setInterval(detectFrame, parseInt($('interval').value) * 1000);
+                addLog('🚀 Запущено', 'success');
+            } catch (e) {
+                if (e.name === 'NotAllowedError' || e.message.includes('Permission denied')) {
+                    alert('⚠️ Вы отменили выбор экрана.\n\nЧтобы бот заработал, нажмите "Запустить", выберите окно с камерами и обязательно нажмите кнопку "Поделиться" внизу окна!');
+                } else {
+                    alert('❌ Ошибка захвата экрана: ' + e.message);
+                }
+                stopDetection();
+            }
+        }
+
+        function stopDetection() {
+            isDetecting = false;
+            if (detectionInterval) clearInterval(detectionInterval);
+            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+            screenVideo.style.display = 'none';
+            noVideoDiv.style.display = 'block';
+            startBtn.disabled = false; stopBtn.disabled = true;
+            statusBadge.textContent = '⏸ Остановлено'; statusBadge.className = 'status-badge status-inactive';
+            ctx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+        }
+
+        window.addEventListener('load', () => loadModels());
     </script>
 </body>
 </html>
