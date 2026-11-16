@@ -4,8 +4,8 @@ header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 
 // ВСТАВЬТЕ ВАШИ ДАННЫЕ СЮДА
-$botToken = 'ВАШ_ТОКЕН'; 
-$chatId = 'ВАШ_CHAT_ID';
+$botToken = '9005989171:AAF7iOziW3xpFgb0pangWl6OmlqkDFsXhKM'; 
+$chatId = '5450527103';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $message = $_POST['message'] ?? 'Обнаружено нарушение';
