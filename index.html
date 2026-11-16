@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <title>AI Камера в Telegram (Телефон + Сон)</title>
+    <!-- Подключаем TensorFlow и модель COCO-SSD -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
     <style>
-        body { background: #1a1a1a; color: white; font-family: Arial, sans-serif; text-align: center; }
+        body { background: #1a1a1a; color: white; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
         .container { position: relative; display: inline-block; margin-top: 20px; }
-        video, canvas.overlay { width: 640px; height: 480px; transform: scaleX(-1); }
+        video, canvas.overlay { width: 640px; height: 480px; transform: scaleX(-1); /* Зеркальное отображение */ }
         canvas.overlay { position: absolute; top: 0; left: 0; }
         #status { margin-top: 15px; font-weight: bold; color: #00ff00; font-size: 18px;}
     </style>
@@ -22,6 +23,7 @@
     </div>
     <div id="status">Загрузка ИИ...</div>
 
+    <!-- Скрытый холст для создания скриншота -->
     <canvas id="snapshot" style="display:none;"></canvas>
 
     <script>
@@ -33,15 +35,20 @@
         const statusDiv = document.getElementById('status');
 
         let model;
+        
+        // Таймеры антиспама
         let lastPhoneAlertTime = 0; 
         let lastSleepAlertTime = 0;
 
         // Переменные для отслеживания сна
         let lastPersonBox = null;
         let stillStartTime = Date.now();
-        const STILL_THRESHOLD = 15; // Пикселей (насколько должна сдвинуться рамка, чтобы считать движение)
-        const SLEEP_TIME_MS = 120000; // 2 минуты без движения = тревога
+        
+        // НАСТРОЙКИ (можно менять)
+        const STILL_THRESHOLD = 15;       // Пикселей (насколько должна сдвинуться рамка, чтобы считать это движением)
+        const SLEEP_TIME_MS = 120000;     // 2 минуты (120 000 мс) без движения = тревога
 
+        // 1. Включаем камеру
         async function setupCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
@@ -52,11 +59,13 @@
             }
         }
 
+        // 2. Загружаем ИИ
         async function loadModel() {
             model = await cocoSsd.load();
             statusDiv.innerText = "ИИ работает. Следим за телефоном и сном...";
         }
 
+        // 3. Главный цикл распознавания
         async function detect() {
             if (video.readyState === 4) {
                 overlay.width = video.videoWidth;
@@ -75,17 +84,22 @@
                 predictions.forEach(p => {
                     const [x, y, w, h] = p.bbox;
                     
-                    if (p.class === 'person' && p.score > 0.6) {
-                        personCount++;
+                    // СНИЖЕННЫЙ ПОРОГ ДЛЯ ЧЕЛОВЕКА (0.35), чтобы ловить лежачих
+                    if (p.class === 'person' && p.score > 0.35) {
                         personDetected = true;
-                        // Берем координаты самого крупного (ближайшего) человека
+                        personCount++;
                         if (!currentPersonBox || (w * h) > (currentPersonBox.w * currentPersonBox.h)) {
                             currentPersonBox = { x, y, w, h };
                         }
-                        drawBox(ctx, x, y, w, h, 'lime', 'Сотрудник');
-                    } else if (p.class === 'cell phone' && p.score > 0.5) {
-                        phoneDetected = true;
-                        drawBox(ctx, x, y, w, h, 'red', 'ТЕЛЕФОН!');
+                        drawBox(ctx, x, y, w, h, 'lime', `Сотрудник (${Math.round(p.score*100)}%)`);
+                    } 
+                    // ЗАЩИТА ОТ ПУЛЬТОВ (порог 0.75 + проверка пропорций)
+                    else if (p.class === 'cell phone' && p.score > 0.75) { 
+                        const aspectRatio = h / w; 
+                        if (aspectRatio < 2.2) { // Телефоны не такие вытянутые, как пульты
+                            phoneDetected = true;
+                            drawBox(ctx, x, y, w, h, 'red', `ТЕЛЕФОН! (${Math.round(p.score*100)}%)`);
+                        }
                     }
                 });
 
@@ -99,34 +113,38 @@
                 // --- ЛОГИКА 2: СОН (Отсутствие движения) ---
                 if (personDetected && currentPersonBox) {
                     if (lastPersonBox) {
-                        // Считаем, насколько сдвинулась рамка
                         const diffX = Math.abs(currentPersonBox.x - lastPersonBox.x);
                         const diffY = Math.abs(currentPersonBox.y - lastPersonBox.y);
 
-                        // Если сдвиг меньше порога (человек не двигается)
                         if (diffX < STILL_THRESHOLD && diffY < STILL_THRESHOLD) {
-                            // Если он не двигается уже долго
+                            // Если неподвижен долгое время
                             if (Date.now() - stillStartTime > SLEEP_TIME_MS && Date.now() - lastSleepAlertTime > 60000) {
                                 lastSleepAlertTime = Date.now();
-                                stillStartTime = Date.now(); // Сбрасываем таймер
+                                stillStartTime = Date.now(); 
                                 let alertText = `😴 <b>Тревога!</b>\nСотрудник не двигается более 2 минут.\nВозможно, спит или отошел.`;
                                 captureAndSend(alertText);
                             }
                         } else {
-                            // Человек пошевелился — сбрасываем таймер неподвижности
+                            // Если пошевелился
                             stillStartTime = Date.now();
                         }
                     }
                     lastPersonBox = currentPersonBox;
                 } else {
-                    // Если человека нет в кадре, сбрасываем таймеры
-                    lastPersonBox = null;
-                    stillStartTime = Date.now();
+                    // Если ИИ потерял человека из виду (например, вы легли и спрятались),
+                    // мы все равно шлем тревогу, если нет движения в кадре
+                    if (Date.now() - stillStartTime > SLEEP_TIME_MS && Date.now() - lastSleepAlertTime > 60000) {
+                        lastSleepAlertTime = Date.now();
+                        stillStartTime = Date.now(); 
+                        let alertText = `😴 <b>Тревога!</b>\nВ кадре давно нет движения (сотрудник пропал из виду или спит).`;
+                        captureAndSend(alertText);
+                    }
                 }
             }
             requestAnimationFrame(detect);
         }
 
+        // Отрисовка рамок
         function drawBox(context, x, y, w, h, color, label) {
             context.strokeStyle = color;
             context.lineWidth = 3;
@@ -136,9 +154,11 @@
             context.fillText(label, x, y - 5);
         }
 
+        // Скриншот и отправка
         async function captureAndSend(text) {
             statusDiv.innerText = "📸 Отправка алерта в Telegram...";
             
+            // Рисуем видео и рамки на скрытый холст
             snapCtx.drawImage(video, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
             snapCtx.drawImage(overlay, 0, 0);
 
@@ -148,6 +168,7 @@
                 formData.append('message', text);
 
                 try {
+                    // Отправляем на наш PHP-скрипт
                     const response = await fetch('send_photo.php', {
                         method: 'POST',
                         body: formData
@@ -155,17 +176,19 @@
                     
                     const result = await response.json();
                     if (result.status === 'success') {
-                        statusDiv.innerText = "✅ Алерт успешно отправлен!";
+                        statusDiv.innerText = "✅ Алерт успешно отправлен в Telegram!";
                         setTimeout(() => statusDiv.innerText = "ИИ работает. Следим...", 3000);
                     } else {
-                        statusDiv.innerText = "❌ Ошибка: " + result.message;
+                        statusDiv.innerText = "❌ Ошибка ТГ: " + result.message;
                     }
                 } catch (e) {
+                    console.error(e);
                     statusDiv.innerText = "❌ Ошибка сети. Проверьте сервер.";
                 }
             }, 'image/jpeg', 0.8);
         }
 
+        // Запуск
         window.onload = async () => {
             await setupCamera();
             await loadModel();
